@@ -5,10 +5,12 @@ import com.retrivedmods.wclient.game.Module
 import com.retrivedmods.wclient.game.ModuleCategory
 import org.cloudburstmc.protocol.bedrock.packet.MovePlayerPacket
 import org.cloudburstmc.protocol.bedrock.packet.PlayerAuthInputPacket
+import org.cloudburstmc.protocol.bedrock.packet.NetworkStackLatencyPacket
 import kotlin.random.Random
 
 class AdvanceDisablerModule : Module("Advance Disabler", ModuleCategory.Misc) {
 
+    // Settings merged from C++ header fields and Kotlin toggles
     private val lifeboatBypass by boolValue("Lifeboat Bypass", true)
     private val hiveBypass by boolValue("Hive Bypass", true)
     private val cubecraftBypass by boolValue("Cubecraft Bypass", true)
@@ -19,12 +21,21 @@ class AdvanceDisablerModule : Module("Advance Disabler", ModuleCategory.Misc) {
 
     private val antiKick by boolValue("Anti Kick", true)
     private val blinkPackets by boolValue("Blink Mode", false)
+
+    // Legacy Mode from C++ header
+    private val mode by intValue("Legacy Mode", 0, 0..3)
+
+    // State variables adapted from C++ private fields
     private var packetCounter = 0
     private val blinkBuffer = mutableListOf<PlayerAuthInputPacket>()
+    private val latencyTimestamps = mutableListOf<Long>()
+    private var clientTicks = 0
+    private var shouldUpdateClientTicks = false
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
+        // MovePlayerPacket logic (from C++ onSendPacket + Kotlin)
         if (packet is MovePlayerPacket) {
             if (lifeboatBypass || hiveBypass || cubecraftBypass) {
                 if (Random.nextInt(4) == 0) {
@@ -33,7 +44,6 @@ class AdvanceDisablerModule : Module("Advance Disabler", ModuleCategory.Misc) {
                 }
             }
             if (spoofTeleportLag && Random.nextInt(3) == 0) {
-
                 packet.teleportationCause = MovePlayerPacket.TeleportationCause.UNKNOWN
             }
             if (antiKick && packet.position.y <= 0.5f) {
@@ -42,6 +52,7 @@ class AdvanceDisablerModule : Module("Advance Disabler", ModuleCategory.Misc) {
             }
         }
 
+        // PlayerAuthInputPacket logic (merged C++ + Kotlin)
         if (packet is PlayerAuthInputPacket) {
             if (blinkPackets) {
                 blinkBuffer.add(packet)
@@ -73,11 +84,23 @@ class AdvanceDisablerModule : Module("Advance Disabler", ModuleCategory.Misc) {
                     0.001f * (Random.nextFloat() - 0.5f)
                 )
             }
+
+            // Legacy Mode behaviors from C++ DisablerNew
+            when (mode) {
+                1 -> if (packet is NetworkStackLatencyPacket) {
+                    latencyTimestamps.add(packet.creationTime)
+                }
+                2 -> {
+                    packet.inputData = packet.inputData or PlayerAuthInputPacket.Input.SNEAK
+                }
+                3 -> {
+                    if (shouldUpdateClientTicks) clientTicks = packet.tick
+                    packet.tick = clientTicks++
+                }
+            }
         }
     }
 
-
-    @Suppress("unused")
     fun onDisable() {
         if (blinkBuffer.isNotEmpty()) {
             sendPacketsToServer(blinkBuffer)
@@ -85,10 +108,8 @@ class AdvanceDisablerModule : Module("Advance Disabler", ModuleCategory.Misc) {
         }
     }
 
-
     private fun sendPacketToServer(packet: PlayerAuthInputPacket) {
-        // TODO: Implement actual packet sending logic using your client's networking/session API.
-
+        // TODO: Implement actual packet sending logic using your Android networking/session API
     }
 
     private fun sendPacketsToServer(packets: List<PlayerAuthInputPacket>) {
